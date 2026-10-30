@@ -6,7 +6,9 @@
 <key>CFBundleDisplayName</key><string>OP1 Control</string>
 <key>CFBundleExecutable</key><string>OP1Control</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>NSHumanReadableCopyright</key><string>MIT License. Not affiliated with Endgame Gear.</string>
+<key>CFBundleShortVersionString</key><string>__VERSION__</string>
 <key>CFBundleVersion</key><string>__BUILD__</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
