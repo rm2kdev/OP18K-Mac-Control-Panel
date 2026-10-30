@@ -116,7 +116,7 @@ OP1 Control never touches firmware. It reads and writes only the mouse's setting
 
 ## How it works
 
-The protocol comes from Endgame Gear's own Windows configuration tool (V1.12) and was checked against a real mouse. The mouse takes two HID feature reports on its vendor interface (usage page `0xFF01`):
+The protocol was reverse engineered from Endgame Gear's own Windows configuration tool (V1.12) with [REA](https://github.com/morluto/rea), then checked against a real mouse. The mouse takes two HID feature reports on its vendor interface (usage page `0xFF01`):
 
 | Report | Size | Purpose |
 | --- | --- | --- |
@@ -163,7 +163,9 @@ docs/           user stories, glossary, fix log, images
 
 ## Credits
 
-Built with [Claude Code](https://claude.com/claude-code) and [bama](https://github.com/daveebbelaar/bama).
+- Built with [Claude Code](https://claude.com/claude-code)
+- App built with [bama](https://github.com/daveebbelaar/bama)
+- Protocol reverse engineered with [REA (Reverse Engineer Anything)](https://github.com/morluto/rea)
 
 ## License
 
