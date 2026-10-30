@@ -38,3 +38,23 @@ Acceptance:
 - [snap] An "Experimental" row shows 250 Hz and 500 Hz; choosing one changes the footer to say Endgame Gear doesn't offer it.
 - [manual] On firmware 1.24, 500 Hz measured about 500 Hz and tracked normally (2026-10-31). 250 Hz not yet tried.
 Status: done
+
+### S-004 A clearer main window
+As the user, I see at a glance which mouse is connected and what's on it, and every
+action is in the toolbar and the Mouse menu.
+Screens: snapshots `main`, `split`, `saved`, `not-connected`, `no-permission`
+Depends: S-001, S-002, S-003
+Acceptance:
+- [snap] A header shows the OP1 8k, its firmware, and Connected / Not connected / No access as a dot plus a word.
+- [snap] Polling Rate has Supported and Experimental rows and the Measured rate row; a measurement shows a check when it is within 15% of the rate on the mouse and a warning otherwise.
+- [snap] Without a mouse, one "Plug in your OP1 8k" card with Try Again replaces the settings; without Input Monitoring, one notice with Open Privacy Settings… does.
+- [snap] After Apply, a "Saved to the mouse." notice names the backup file; editing again clears it.
+- [snap] No field opens focused; DPI levels beyond Levels in use say "Not in use".
+- [manual] Mouse menu: Apply Changes ⌘S, Revert Changes, Read Settings Again ⌘R, Measure Polling Rate ⇧⌘M, Show Backups in Finder.
+UX:
+- Flow: open -> header says Connected -> change rate or DPI -> Apply (⌘S) -> notice confirms and names the backup
+- Surface: one fixed-size window, grouped form, toolbar at the trailing edge (Read Settings Again, Revert | Apply)
+- States: reading (spinner in header), connected, not connected, no access, saved, problem
+- Words: "Supported", "Experimental", "Measured rate", "Levels in use", "Not in use", "Saved to the mouse."
+- Access: every toolbar action has a menu command and a shortcut in its tooltip; status never relies on color alone
+Status: done

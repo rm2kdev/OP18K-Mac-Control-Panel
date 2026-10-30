@@ -109,10 +109,13 @@ public enum InputMonitoring {
     public static func request() -> Bool { IOHIDRequestAccess(kIOHIDRequestTypeListenEvent) }
 }
 
-/// Saves the settings block to ~/Library/Application Support/OP1Control/backups before a write.
+/// Where `backup(_:)` saves settings blocks.
+public let backupDirectory = FileManager.default.homeDirectoryForCurrentUser
+    .appending(path: "Library/Application Support/OP1Control/backups")
+
+/// Saves the settings block to the backup directory before a write.
 public func backup(_ settings: Settings) throws -> URL {
-    let dir = FileManager.default.homeDirectoryForCurrentUser
-        .appending(path: "Library/Application Support/OP1Control/backups")
+    let dir = backupDirectory
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
     let url = dir.appending(path: "settings-\(stamp).bin")

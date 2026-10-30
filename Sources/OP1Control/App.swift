@@ -31,14 +31,47 @@ struct OP1ControlApp: App {
     var body: some Scene {
         Window("OP1 Control", id: "main") {
             ContentView(model: model)
-                .frame(width: 420)
+                .frame(width: ContentView.width)
                 .fixedSize()
                 // The title would push Apply into the toolbar's overflow menu at this width.
                 .toolbar(removing: .title)
                 .task { model.start() }
         }
         .windowResizability(.contentSize)
+        .commands { MouseCommands(model: model) }
     }
+}
+
+/// The Mouse menu: every toolbar action, with its shortcut.
+struct MouseCommands: Commands {
+    @ObservedObject var model: MouseModel
+
+    var body: some Commands {
+        CommandMenu("Mouse") {
+            Button("Apply Changes") { model.apply() }
+                .keyboardShortcut("s")
+                .disabled(!model.canApply)
+            Button("Revert Changes") { model.revert() }
+                .disabled(!model.hasChanges || model.isBusy)
+            Divider()
+            Button("Read Settings Again") { model.refresh() }
+                .keyboardShortcut("r")
+                .disabled(model.isBusy)
+            Button("Measure Polling Rate") { model.measure() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(!model.connected || model.measuring)
+            Divider()
+            Button("Show Backups in Finder") { model.showBackups() }
+        }
+    }
+}
+
+/// A short status shown under the mouse header.
+struct Notice: Equatable {
+    enum Kind { case done, problem }
+    var kind: Kind
+    var text: String
+    var detail: String?
 }
 
 final class MouseModel: ObservableObject {
@@ -46,23 +79,33 @@ final class MouseModel: ObservableObject {
     /// The settings as last read from the mouse.
     @Published var loaded: MouseSettings?
     /// The settings with the user's edits, written by Apply.
-    @Published var draft: MouseSettings?
+    @Published var draft: MouseSettings? {
+        didSet { if notice?.kind == .done && draft != loaded { notice = nil } }
+    }
     @Published var separateXY = false
     @Published var systemHz: Int?
-    @Published var message: String?
-    @Published var isError = false
+    @Published var notice: Notice?
     @Published var isBusy = false
+    /// True once the first read finished, so "not connected" doesn't flash at launch.
+    @Published var hasRead = false
     @Published var needsPermission = false
-    @Published var measuring = false
+    @Published var measureEnds: Date?
     @Published var measuredHz: Int?
+    /// The rate on the mouse when `measuredHz` was taken.
+    @Published var measuredAgainst: PollingRate?
     @Published var measureNote: String?
+
+    static let measureSeconds = 4.0
 
     var connected: Bool { loaded != nil }
     var hasChanges: Bool { draft != nil && draft != loaded }
+    var canApply: Bool { hasChanges && !isBusy && loaded?.looksValid == true }
+    var measuring: Bool { measureEnds != nil }
 
     func start() {
         if !InputMonitoring.isGranted && !InputMonitoring.request() {
             needsPermission = true
+            hasRead = true
             systemHz = systemReportedPollingHz()
             return
         }
@@ -76,7 +119,10 @@ final class MouseModel: ObservableObject {
             let settings = try mouse.readSettings()
             self.firmware = mouse.firmwareString
             self.show(settings)
-            self.message = settings.looksValid ? nil : "These settings don't look like an OP1 8k. Writing is disabled."
+            self.notice = settings.looksValid ? nil : Notice(
+                kind: .problem,
+                text: "These settings don't look like an OP1 8k v1.",
+                detail: "Apply is turned off so nothing on the mouse gets overwritten.")
         }
     }
 
@@ -87,7 +133,7 @@ final class MouseModel: ObservableObject {
     }
 
     func apply() {
-        guard let edits = draft else { return }
+        guard canApply, let edits = draft else { return }
         run {
             let mouse = try OP1Device.open()
             let current = try mouse.readSettings()
@@ -98,7 +144,8 @@ final class MouseModel: ObservableObject {
             let updated = current.applying(edits)
             try mouse.writeSettings(updated)
             self.show(updated)
-            self.message = "Saved to the mouse. Backup of the old settings: \(saved.lastPathComponent)"
+            self.notice = Notice(kind: .done, text: "Saved to the mouse.",
+                                 detail: "The old settings are backed up as \(saved.lastPathComponent).")
             try? await Task.sleep(for: .milliseconds(600))
         }
     }
@@ -106,7 +153,7 @@ final class MouseModel: ObservableObject {
     func revert() {
         guard let loaded else { return }
         show(loaded)
-        message = nil
+        notice = nil
     }
 
     // MARK: Bindings into the draft
@@ -153,19 +200,21 @@ final class MouseModel: ObservableObject {
     // MARK: Measure
 
     func measure() {
+        guard !measuring else { return }
         let meter = ReportRateMeter()
         do { try meter.start() } catch {
             measureNote = "\(error)"
             return
         }
-        measuring = true
         measuredHz = nil
-        measureNote = "Move the OP1 in fast circles…"
+        measureNote = "Keep the mouse moving."
+        measureEnds = Date().addingTimeInterval(Self.measureSeconds)
         Task {
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: .seconds(Self.measureSeconds))
             measuredHz = meter.stop()
+            measuredAgainst = loaded?.pollingRate
             measureNote = measuredHz == nil ? "The mouse barely moved. Try again and keep it moving." : nil
-            measuring = false
+            measureEnds = nil
         }
     }
 
@@ -173,20 +222,29 @@ final class MouseModel: ObservableObject {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
     }
 
+    func showBackups() {
+        try? FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(backupDirectory)
+    }
+
     private func run(_ body: @escaping () async throws -> Void) {
         isBusy = true
         Task {
             do {
                 try await body()
-                isError = false
             } catch OP1Error.notPermitted {
                 needsPermission = true
-                message = nil
+                notice = nil
+            } catch OP1Error.notFound {
+                // The not-connected view says this; a notice would repeat it.
+                loaded = nil
+                draft = nil
+                notice = nil
             } catch {
-                message = "\(error)"
-                isError = true
+                notice = Notice(kind: .problem, text: "\(error)")
             }
             systemHz = systemReportedPollingHz()
+            hasRead = true
             isBusy = false
         }
     }
