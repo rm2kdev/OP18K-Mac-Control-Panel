@@ -28,3 +28,13 @@ UX:
 - Words: "DPI levels", "Level 1", "Separate X and Y", "Apply", "Revert"
 - Access: Return commits a field; each stepper moves by 50; VoiceOver "Level 1 DPI"
 Status: done
+
+### S-003 Try the experimental 500 and 250 Hz rates
+As the user, I pick 500 or 250 Hz from an Experimental row under the polling rate.
+Screens: snapshot `main`
+Depends: S-001
+Acceptance:
+- [self] 500 and 250 Hz write dividers 16 and 32; the four official rates keep dividers 8/4/2/1.
+- [snap] An "Experimental" row shows 250 Hz and 500 Hz; choosing one changes the footer to say Endgame Gear doesn't offer it.
+- [manual] On firmware 1.24, 500 Hz measured about 500 Hz and tracked normally (2026-10-31). 250 Hz not yet tried.
+Status: done

@@ -7,7 +7,8 @@ public enum SelfTest {
         var failures: [String] = []
         func check(_ ok: Bool, _ name: String) { if !ok { failures.append(name) } }
 
-        check(PollingRate.allCases.map(\.divider) == [8, 4, 2, 1], "dividers match the official tool")
+        check(PollingRate.official.map(\.divider) == [8, 4, 2, 1], "dividers match the official tool")
+        check(PollingRate(divider: 16) == .hz500 && PollingRate(divider: 32) == .hz250, "experimental dividers 16 and 32")
         check(PollingRate(divider: 3) == nil, "unknown divider is rejected")
 
         var report = [UInt8](repeating: 0, count: OP1.settingsReportSize)

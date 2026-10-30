@@ -52,14 +52,26 @@ struct ContentView: View {
     private var pollingSection: some View {
         Section {
             Picker("Polling rate", selection: model.pollingRate) {
-                ForEach(PollingRate.allCases) { Text($0.label).tag($0) }
+                ForEach(PollingRate.official) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
-            .disabled(!model.connected)
+            // Both pickers share one value; each shows no selection when the rate is in the other.
+            Picker("Experimental", selection: model.pollingRate) {
+                ForEach(PollingRate.allCases.filter(\.isExperimental)) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .help("Rates Endgame Gear's own tools don't offer")
         } footer: {
-            Text("1000 Hz is smoothest on macOS. Higher rates flood the window server and make drags stutter.")
-                .fixedSize(horizontal: false, vertical: true)
+            Group {
+                if model.pollingRate.wrappedValue.isExperimental {
+                    Text("Endgame Gear doesn't offer \(model.pollingRate.wrappedValue.label). After Apply, use Measure to check the mouse really reports at this rate.")
+                } else {
+                    Text("1000 Hz is smoothest on macOS. Higher rates flood the window server and make drags stutter.")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
+        .disabled(!model.connected)
     }
 
     private var measureSection: some View {

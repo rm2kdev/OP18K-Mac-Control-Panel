@@ -4,6 +4,7 @@ import OP1Kit
 let usage = """
 usage: op1ctl info              show polling rate and firmware
        op1ctl rate <hz>         set polling rate: 1000, 2000, 4000 or 8000
+                                (500 and 250 are experimental)
        op1ctl dpi <level> <dpi> [<y-dpi>]
                                 set a DPI level (1-4), 50-26000 in steps of 50
        op1ctl dpi-levels <n>    set how many levels the DPI button cycles through (1-4)
@@ -67,7 +68,7 @@ func run(_ args: [String]) throws {
 
     case "rate":
         guard args.count == 2, let hz = Int(args[1]), let rate = PollingRate(rawValue: hz) else {
-            throw OP1Error.refused("rate must be 1000, 2000, 4000 or 8000")
+            throw OP1Error.refused("rate must be 250, 500, 1000, 2000, 4000 or 8000")
         }
         let mouse = try OP1Device.open()
         var settings = try mouse.readSettings()

@@ -13,6 +13,7 @@
 //
 // Byte 5 of the settings holds the polling rate as a divider of 8000 Hz.
 // The official tool's combo box maps 1000/2000/4000/8000 Hz to 8/4/2/1.
+// 500 and 250 Hz use dividers 16 and 32, which the official tools never write.
 
 public enum OP1 {
     public static let vendorID = 0x3367
@@ -34,6 +35,8 @@ public enum OP1 {
 }
 
 public enum PollingRate: Int, CaseIterable, Sendable, Identifiable {
+    case hz250 = 250
+    case hz500 = 500
     case hz1000 = 1000
     case hz2000 = 2000
     case hz4000 = 4000
@@ -44,14 +47,16 @@ public enum PollingRate: Int, CaseIterable, Sendable, Identifiable {
     public var divider: UInt8 { UInt8(8000 / rawValue) }
 
     public init?(divider: UInt8) {
-        switch divider {
-        case 8: self = .hz1000
-        case 4: self = .hz2000
-        case 2: self = .hz4000
-        case 1: self = .hz8000
-        default: return nil
-        }
+        guard divider > 0, 8000 % Int(divider) == 0, let rate = PollingRate(rawValue: 8000 / Int(divider)) else { return nil }
+        self = rate
     }
+
+    /// 500 and 250 Hz (dividers 16 and 32) are not offered by Endgame Gear's tools;
+    /// Endgame Gear does not support them. On firmware 1.24, 500 Hz measured about 500 Hz and
+    /// tracked normally; 250 Hz has not been tried on a mouse.
+    public var isExperimental: Bool { rawValue < 1000 }
+
+    public static var official: [PollingRate] { allCases.filter { !$0.isExperimental } }
 
     public var label: String { "\(rawValue) Hz" }
 }
