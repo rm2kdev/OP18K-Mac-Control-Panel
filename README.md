@@ -49,7 +49,15 @@ macOS doesn't cope well with 8000 updates a second. The window server falls behi
 
 > **Why Input Monitoring?** The OP1 also reports itself as a keyboard, so macOS asks before any app can talk to it. OP1 Control only talks to the OP1 and never records what you type.
 
-<!-- GATEKEEPER -->
+### First launch: "Apple could not verify…"
+
+The app is signed with a Developer ID but not notarized, so on the first launch macOS shows a warning. To open it:
+
+1. Click **Done** on the warning.
+2. Open **System Settings → Privacy & Security** and scroll down to the **Security** section.
+3. Next to *"OP1 Control" was blocked*, click **Open Anyway** and confirm.
+
+You only do this once. If you prefer the terminal: `xattr -dr com.apple.quarantine /Applications/OP1Control.app`
 
 ## Screenshots
 
