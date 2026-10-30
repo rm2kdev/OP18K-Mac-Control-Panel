@@ -2,6 +2,9 @@ import SwiftUI
 import Combine
 import OP1Kit
 
+// OP1Kit.Settings, named apart from SwiftUI's Settings scene.
+typealias MouseSettings = OP1Kit.Settings
+
 // ObservableObject and property wrappers rather than @Observable and @State:
 // the Command Line Tools ship without the SwiftUI macro plugins.
 
@@ -10,12 +13,17 @@ struct OP1ControlApp: App {
     @StateObject private var model = MouseModel()
 
     init() {
+        let args = CommandLine.arguments
         // `open OP1Control.app --args --dump-raw <file>` writes the raw replies and quits.
         // Runs as the app so it uses the app's Input Monitoring permission. Read-only.
-        let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--dump-raw"), i + 1 < args.count {
             let text = (try? OP1Device.open().rawReplies()) ?? "could not open the mouse\n"
             try? text.write(toFile: args[i + 1], atomically: true, encoding: .utf8)
+            exit(0)
+        }
+        // `OP1Control --snapshot <dir>` renders the window in light and dark with sample settings and quits.
+        if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
+            Snapshot.run(to: args[i + 1])
             exit(0)
         }
     }
@@ -23,8 +31,10 @@ struct OP1ControlApp: App {
     var body: some Scene {
         Window("OP1 Control", id: "main") {
             ContentView(model: model)
-                .frame(width: 400)
+                .frame(width: 420)
                 .fixedSize()
+                // The title would push Apply into the toolbar's overflow menu at this width.
+                .toolbar(removing: .title)
                 .task { model.start() }
         }
         .windowResizability(.contentSize)
@@ -33,8 +43,11 @@ struct OP1ControlApp: App {
 
 final class MouseModel: ObservableObject {
     @Published var firmware: String?
-    @Published var current: PollingRate?
-    @Published var selected: PollingRate = .hz1000
+    /// The settings as last read from the mouse.
+    @Published var loaded: MouseSettings?
+    /// The settings with the user's edits, written by Apply.
+    @Published var draft: MouseSettings?
+    @Published var separateXY = false
     @Published var systemHz: Int?
     @Published var message: String?
     @Published var isError = false
@@ -44,7 +57,8 @@ final class MouseModel: ObservableObject {
     @Published var measuredHz: Int?
     @Published var measureNote: String?
 
-    var connected: Bool { firmware != nil }
+    var connected: Bool { loaded != nil }
+    var hasChanges: Bool { draft != nil && draft != loaded }
 
     func start() {
         if !InputMonitoring.isGranted && !InputMonitoring.request() {
@@ -61,28 +75,82 @@ final class MouseModel: ObservableObject {
             let mouse = try OP1Device.open()
             let settings = try mouse.readSettings()
             self.firmware = mouse.firmwareString
-            self.current = settings.pollingRate
-            if let rate = settings.pollingRate, rate != .hz8000 { self.selected = rate }
+            self.show(settings)
             self.message = settings.looksValid ? nil : "These settings don't look like an OP1 8k. Writing is disabled."
         }
     }
 
+    func show(_ settings: MouseSettings) {
+        loaded = settings
+        draft = settings
+        separateXY = (0..<MouseSettings.dpiLevelCount).contains { settings.dpi($0).isSplit }
+    }
+
     func apply() {
-        let rate = selected
+        guard let edits = draft else { return }
         run {
             let mouse = try OP1Device.open()
-            var settings = try mouse.readSettings()
-            guard settings.looksValid else {
+            let current = try mouse.readSettings()
+            guard current.looksValid else {
                 throw OP1Error.refused("The settings on this mouse don't look like an OP1 8k. Nothing was changed.")
             }
-            let saved = try backup(settings)
-            settings.pollingRate = rate
-            try mouse.writeSettings(settings)
-            self.current = rate
-            self.message = "Saved \(rate.label) to the mouse. Backup of the old settings: \(saved.lastPathComponent)"
+            let saved = try backup(current)
+            let updated = current.applying(edits)
+            try mouse.writeSettings(updated)
+            self.show(updated)
+            self.message = "Saved to the mouse. Backup of the old settings: \(saved.lastPathComponent)"
             try? await Task.sleep(for: .milliseconds(600))
         }
     }
+
+    func revert() {
+        guard let loaded else { return }
+        show(loaded)
+        message = nil
+    }
+
+    // MARK: Bindings into the draft
+
+    var pollingRate: Binding<PollingRate> {
+        Binding(get: { self.draft?.pollingRate ?? .hz1000 },
+                set: { self.draft?.pollingRate = $0 })
+    }
+
+    var activeLevels: Binding<Int> {
+        Binding(get: { self.draft?.activeDPILevels ?? MouseSettings.dpiLevelCount },
+                set: { self.draft?.activeDPILevels = $0 })
+    }
+
+    enum Axis { case both, x, y }
+
+    func dpi(_ level: Int, _ axis: Axis) -> Binding<Int> {
+        Binding(
+            get: {
+                guard let value = self.draft?.dpi(level) else { return MouseSettings.dpiRange.lowerBound }
+                return axis == .y ? value.y : value.x
+            },
+            set: { newValue in
+                guard var value = self.draft?.dpi(level) else { return }
+                switch axis {
+                case .both: value = DPILevel(newValue)
+                case .x: value.x = newValue
+                case .y: value.y = newValue
+                }
+                self.draft?.setDPI(level, value)
+            })
+    }
+
+    /// Turning separate X and Y off sets each level's Y to its X.
+    var separate: Binding<Bool> {
+        Binding(get: { self.separateXY }, set: { on in
+            self.separateXY = on
+            guard !on, var d = self.draft else { return }
+            for i in 0..<MouseSettings.dpiLevelCount { d.setDPI(i, DPILevel(d.dpi(i).x)) }
+            self.draft = d
+        })
+    }
+
+    // MARK: Measure
 
     func measure() {
         let meter = ReportRateMeter()
@@ -121,72 +189,5 @@ final class MouseModel: ObservableObject {
             systemHz = systemReportedPollingHz()
             isBusy = false
         }
-    }
-}
-
-struct ContentView: View {
-    @ObservedObject var model: MouseModel
-
-    var body: some View {
-        Form {
-            if model.needsPermission {
-                Section {
-                    Text("OP1 Control needs Input Monitoring to talk to the mouse. macOS asks for it because the OP1 also reports itself as a keyboard. Turn on OP1 Control, then quit and reopen this app.")
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Open Privacy Settings") { model.openPrivacySettings() }
-                }
-            }
-            Section {
-                LabeledContent("Mouse", value: model.connected ? "Endgame Gear OP1 8k" : "Not connected")
-                if let firmware = model.firmware {
-                    LabeledContent("Firmware", value: firmware)
-                }
-                LabeledContent("Polling rate on mouse", value: model.current?.label ?? "–")
-                if let hz = model.systemHz {
-                    LabeledContent("USB report interval", value: "\(hz) Hz")
-                }
-            }
-            Section {
-                LabeledContent("Measured rate") {
-                    HStack {
-                        if let hz = model.measuredHz {
-                            Text("≈ \(hz) Hz")
-                        }
-                        Button(model.measuring ? "Measuring…" : "Measure") { model.measure() }
-                            .disabled(model.measuring)
-                    }
-                }
-                Text(model.measureNote ?? "Counts the updates the mouse actually sends while you move it for 4 seconds.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Section {
-                Picker("New rate", selection: $model.selected) {
-                    ForEach(PollingRate.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Text("1000 Hz is smoothest on macOS. Higher rates flood the window server and make drags stutter.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let message = model.message {
-                Text(message)
-                    .foregroundStyle(model.isError ? .red : .secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .formStyle(.grouped)
-        .toolbar {
-            ToolbarItemGroup {
-                Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }
-                Button("Apply") { model.apply() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.connected || model.selected == model.current)
-            }
-        }
-        .disabled(model.isBusy)
     }
 }

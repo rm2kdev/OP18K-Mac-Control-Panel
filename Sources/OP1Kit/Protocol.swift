@@ -96,6 +96,94 @@ public struct Settings: Equatable, Sendable {
     /// A block that fails this check is not written back.
     public var looksValid: Bool {
         pollingRate != nil && (1...4).contains(cpiLevelCount)
+            && (0..<Self.dpiLevelCount).allSatisfy { i in
+                let level = dpi(i)
+                return Self.dpiRange.contains(level.x) && Self.dpiRange.contains(level.y)
+                    && bytes[Self.dpiOffset(i)] <= 1
+            }
+    }
+
+    // MARK: DPI
+    //
+    // Byte 14 is how many levels the DPI button cycles through (1 to 4).
+    // Bytes 35 to 54 hold four 5-byte levels: a split flag, then X and Y as
+    // little-endian 16-bit values. The official tool clamps to 50...26000,
+    // rounds to the nearest 50 and sets the flag when X and Y differ.
+    // Byte 13 is the mouse's current level; the official tool never writes it.
+
+    public static let dpiLevelCount = 4
+    public static let dpiRange = 50...26000
+    public static let dpiStep = 50
+    static let dpiTableOffset = 35
+    static let dpiEntrySize = 5
+
+    static func dpiOffset(_ level: Int) -> Int { dpiTableOffset + level * dpiEntrySize }
+
+    /// Clamps to 50...26000 and rounds to the nearest 50, as the official tool does.
+    public static func normalizedDPI(_ value: Int) -> Int {
+        let clamped = min(max(value, dpiRange.lowerBound), dpiRange.upperBound)
+        return min((clamped + dpiStep / 2) / dpiStep * dpiStep, dpiRange.upperBound)
+    }
+
+    /// How many levels the DPI button cycles through.
+    public var activeDPILevels: Int {
+        get { Int(cpiLevelCount) }
+        set { bytes[Self.cpiLevelCountOffset] = UInt8(min(max(newValue, 1), Self.dpiLevelCount)) }
+    }
+
+    public func dpi(_ level: Int) -> DPILevel {
+        let o = Self.dpiOffset(level)
+        return DPILevel(x: Int(bytes[o + 1]) | Int(bytes[o + 2]) << 8,
+                        y: Int(bytes[o + 3]) | Int(bytes[o + 4]) << 8)
+    }
+
+    public mutating func setDPI(_ level: Int, _ value: DPILevel) {
+        let x = Self.normalizedDPI(value.x), y = Self.normalizedDPI(value.y)
+        let o = Self.dpiOffset(level)
+        bytes[o] = x != y ? 1 : 0
+        bytes[o + 1] = UInt8(x & 0xFF)
+        bytes[o + 2] = UInt8(x >> 8)
+        bytes[o + 3] = UInt8(y & 0xFF)
+        bytes[o + 4] = UInt8(y >> 8)
+    }
+
+    /// Copies the fields this app edits (polling rate and DPI) from `edits`,
+    /// keeping every other byte, including the current level, as read.
+    public func applying(_ edits: Settings) -> Settings {
+        var out = self
+        out.pollingRate = edits.pollingRate
+        out.activeDPILevels = edits.activeDPILevels
+        for i in 0..<Self.dpiLevelCount { out.setDPI(i, edits.dpi(i)) }
+        return out
+    }
+}
+
+public struct DPILevel: Equatable, Sendable {
+    public var x: Int
+    public var y: Int
+
+    public init(x: Int, y: Int) {
+        self.x = x
+        self.y = y
+    }
+
+    public init(_ both: Int) { self.init(x: both, y: both) }
+
+    public var isSplit: Bool { x != y }
+    public var label: String { isSplit ? "\(x) × \(y)" : "\(x)" }
+}
+
+extension Settings {
+    /// A settings block that matches the mouse this app was built against, for snapshots and self-tests.
+    public static var sample: Settings {
+        var report = [UInt8](repeating: 0, count: OP1.settingsReportSize)
+        report[1] = OP1.statusOK
+        var s = try! Settings(report: report)
+        s.pollingRate = .hz1000
+        s.activeDPILevels = 4
+        s.bytes[13] = 2
+        for (i, v) in [400, 800, 1600, 3200].enumerated() { s.setDPI(i, DPILevel(v)) }
+        return s
     }
 
     /// The 0xA0 report that stores these settings, laid out as the official tool builds it.

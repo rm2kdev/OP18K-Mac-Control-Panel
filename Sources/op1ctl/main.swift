@@ -4,10 +4,35 @@ import OP1Kit
 let usage = """
 usage: op1ctl info              show polling rate and firmware
        op1ctl rate <hz>         set polling rate: 1000, 2000, 4000 or 8000
+       op1ctl dpi <level> <dpi> [<y-dpi>]
+                                set a DPI level (1-4), 50-26000 in steps of 50
+       op1ctl dpi-levels <n>    set how many levels the DPI button cycles through (1-4)
        op1ctl dump              print the raw settings block
        op1ctl restore <file>    write back a settings backup
        op1ctl selftest          check the protocol code (no mouse needed)
 """
+
+func printDPI(_ settings: Settings) {
+    for i in 0..<Settings.dpiLevelCount {
+        let state = i < settings.activeDPILevels ? "" : "  (off)"
+        print("DPI level \(i + 1):   \(settings.dpi(i).label)\(state)")
+    }
+}
+
+/// Reads, changes, backs up and writes the settings, then shows the DPI levels.
+func modify(_ change: (inout Settings) -> Void) throws {
+    let mouse = try OP1Device.open()
+    let current = try mouse.readSettings()
+    guard current.looksValid else {
+        throw OP1Error.refused("the settings read from the mouse do not look like an OP1 8k v1. Nothing was written.")
+    }
+    var edited = current
+    change(&edited)
+    if edited == current { print("No change."); return }
+    print("Backup:        \(try backup(current).path)")
+    try mouse.writeSettings(edited)
+    printDPI(edited)
+}
 
 func run(_ args: [String]) throws {
     switch args.first {
@@ -17,7 +42,21 @@ func run(_ args: [String]) throws {
         print("Firmware:      \(mouse.firmwareString)")
         print("Polling rate:  \(settings.pollingRate?.label ?? "unknown (divider \(settings.pollingDivider))")")
         if let hz = systemReportedPollingHz() { print("macOS sees:    \(hz) Hz") }
+        printDPI(settings)
         print("Settings look valid: \(settings.looksValid ? "yes" : "NO")")
+
+    case "dpi":
+        guard (3...4).contains(args.count), let level = Int(args[1]), (1...4).contains(level),
+              let x = Int(args[2]), let y = Int(args.count == 4 ? args[3] : args[2]) else {
+            throw OP1Error.refused("usage: op1ctl dpi <level 1-4> <dpi> [<y-dpi>]")
+        }
+        try modify { $0.setDPI(level - 1, DPILevel(x: x, y: y)) }
+
+    case "dpi-levels":
+        guard args.count == 2, let n = Int(args[1]), (1...4).contains(n) else {
+            throw OP1Error.refused("dpi-levels must be 1, 2, 3 or 4")
+        }
+        try modify { $0.activeDPILevels = n }
 
     case "dump":
         let settings = try OP1Device.open().readSettings()
